@@ -23,6 +23,7 @@ func main() {
 	// This should run in a go routine so when it gets killed it should write things to permanent storage
 	// Further should it clean up all orphaned go routines? I don't know for now nope
 	// The sigint story by killing the application and writing it to a file is for later This way you can just run the application and then it will write to the storage and stuff
+	// Probably have to make a client server model. Especially as I want to run commands and shit and have them be persistent
 	keyVal := sessions{}
 	for {
 		dirs, err := findCmd()
