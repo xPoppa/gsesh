@@ -1,23 +1,37 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
-	"os"
+	"io"
+	"log"
+	"net"
 	"os/exec"
 	"strings"
+	"time"
 
-	fzf "github.com/junegunn/fzf/src"
+	"github.com/xPoppa/gsesh/client"
 )
 
-func exit(code int, err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-	}
-	os.Exit(code)
-}
-
 type sessions map[string]int
+
+const (
+	SERVER_SOCKET = "/tmp/gsesh.sock"
+)
+
+// This is all server code
+
+func handleConn(c net.Conn) {
+	defer c.Close()
+	for {
+		_, err := io.WriteString(c, "Hi from server\n")
+		if err != nil {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+}
 
 func main() {
 	// This should run in a go routine so when it gets killed it should write things to permanent storage
@@ -25,25 +39,31 @@ func main() {
 	// The sigint story by killing the application and writing it to a file is for later This way you can just run the application and then it will write to the storage and stuff
 	// Probably have to make a client server model. Especially as I want to run commands and shit and have them be persistent
 	keyVal := sessions{}
+	fmt.Println("Server listening on socket: ", SERVER_SOCKET)
+	listen, err := net.Listen("unix", SERVER_SOCKET)
+	if err != nil {
+		log.Fatal("Cannot open socket: ", SERVER_SOCKET, " with err: ", err)
+	}
+	go client.Run()
+	defer listen.Close()
+
 	for {
-		dirs, err := findCmd()
+		conn, err := listen.Accept()
 		if err != nil {
-			fmt.Printf("Find failed with error: %s\n", err)
-			os.Exit(1)
+			log.Println("Error while accepting listeners on: ", SERVER_SOCKET, " with err: ", err)
+			continue
 		}
-		code, err, out := fzff(dirs)
-		fmt.Println(out)
-		fmt.Println(code)
-		if code == 130 {
-			break
-		}
+
+		message, err := bufio.NewReader(conn).ReadString('\n')
 		if err != nil {
-			exit(code, err)
+			log.Fatal(err)
 		}
-		go ghostty(out, keyVal)
+		fmt.Print("Message Received:", string(message[:len(message)-2]))
+		go ghostty(string(message[:len(message)-2]), keyVal)
 	}
 }
 
+// server code
 func goToWindow(w string) error {
 	cmd := exec.Command("wmctrl", "-ia", w)
 	err := cmd.Start()
@@ -57,6 +77,7 @@ func goToWindow(w string) error {
 	return nil
 }
 
+// server code
 func handleExistingSession(in string, pid int) error {
 	buff := &bytes.Buffer{}
 	fmt.Println("Already exists: ", in)
@@ -89,7 +110,9 @@ func handleExistingSession(in string, pid int) error {
 	return nil
 }
 
+// This is server code
 func ghostty(in string, keyVal sessions) error {
+	fmt.Println("The in string", in)
 	if pid, ok := keyVal[in]; ok {
 		return handleExistingSession(in, pid)
 	}
@@ -107,63 +130,4 @@ func ghostty(in string, keyVal sessions) error {
 		delete(keyVal, in)
 	}
 	return nil
-}
-
-func findCmd() (*bytes.Buffer, error) {
-	homeDir, _ := os.UserHomeDir()
-	findCmd := exec.Command(
-		"find",
-		"-L",
-		homeDir+"/boot.dev",
-		homeDir+"/go",
-		homeDir+"/haskell",
-		homeDir+"/frontendmasters",
-		homeDir+"/Projects",
-		homeDir+"/natalie",
-		homeDir+"/",
-		"-mindepth", "1",
-		"-maxdepth", "1",
-		"-type", "d")
-	buff := bytes.NewBuffer([]byte{})
-	findCmd.Stdout = buff
-	err := findCmd.Start()
-	if err != nil {
-		return buff, err
-	}
-	findCmd.Wait()
-	return buff, nil
-}
-
-func fzff(in *bytes.Buffer) (int, error, string) {
-	inputChan := make(chan string)
-	go func() {
-		for s := range strings.SplitSeq(in.String(), "\n") {
-			inputChan <- s
-		}
-		close(inputChan)
-	}()
-
-	output := ""
-
-	outputChan := make(chan string)
-	go func() {
-		for s := range outputChan {
-			output = s
-		}
-	}()
-
-	options, err := fzf.ParseOptions(
-		true, // whether to load defaults ($FZF_DEFAULT_OPTS_FILE and $FZF_DEFAULT_OPTS)
-		[]string{"--multi", "--reverse", "--border", "--height=40%"},
-	)
-
-	if err != nil {
-		exit(fzf.ExitError, err)
-	}
-	options.Input = inputChan
-	options.Output = outputChan
-
-	// Run fzf
-	code, err := fzf.Run(options)
-	return code, err, output
 }
