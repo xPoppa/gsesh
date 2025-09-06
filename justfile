@@ -5,7 +5,9 @@ cli:
   go build -o cli ./cmd/cli/main.go
 
 run-server: server
-  ./serv &
+  ./serv
 
-run: cli run-server
+run: cli
   ./cli
+
+default: run
