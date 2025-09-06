@@ -4,24 +4,19 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	db "github.com/xPoppa/gsesh/internal"
 	"log"
 	"net"
 	"os"
 	"os/exec"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
-	"time"
-
-	"github.com/boltdb/bolt"
 )
-
-var STORAGE_DIR = "/home/poppa/.local/share/gsesh"
 
 const (
 	SERVER_SOCKET = "/tmp/gsesh.sock"
-	BUCKET_NAME   = "sessions"
+	STORAGE_DIR   = "/home/poppa/.local/share/gsesh"
 )
 
 type sessions map[string]int
@@ -38,18 +33,11 @@ func Run() {
 		log.Fatal(err)
 	}
 
-	db, err := bolt.Open(STORAGE_DIR+"/my.db", 0660, &bolt.Options{Timeout: 1 * time.Second})
-	defer db.Close()
+	store, err := db.NewDB(STORAGE_DIR + "/my.db")
 	if err != nil {
 		log.Fatal(err)
 	}
-	db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
+	defer store.Close()
 	fmt.Println("Server listening on socket: ", SERVER_SOCKET)
 	listen, err := net.Listen("unix", SERVER_SOCKET)
 	if err != nil {
@@ -65,7 +53,6 @@ func Run() {
 	go func() {
 		<-c
 		os.Remove(SERVER_SOCKET)
-		db.Close()
 		os.Exit(1)
 	}()
 
@@ -82,7 +69,7 @@ func Run() {
 		}
 
 		//fmt.Print("Message Received:", string(message[:len(message)-2]))
-		go ghostty(string(message[:len(message)-1]), db)
+		go ghostty(string(message[:len(message)-1]), store)
 	}
 }
 
@@ -134,49 +121,28 @@ func handleExistingSession(in string, pid int) error {
 }
 
 // This is server code
-func ghostty(in string, db *bolt.DB) error {
+func ghostty(in string, db *db.DB) error {
 	fmt.Println("The in string", in)
 
-	var pid int
-	var exists bool
-	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(BUCKET_NAME))
-		bpid := b.Get([]byte(in))
-		if bpid != nil {
-			exists = true
-			p, err := strconv.Atoi(string(bpid))
-			if err != nil {
-				return err
-			}
-			pid = p
-			return nil
-		}
-		return nil
-	})
-	if exists {
-		return handleExistingSession(in, pid)
+	res, err := db.GetPid(in)
+	if err != nil {
+		return err
+	}
+	if res.Exists {
+		return handleExistingSession(in, res.Pid)
 	}
 
 	cmd := exec.Command("ghostty", "--working-directory="+in)
-	err := cmd.Start()
+	err = cmd.Start()
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Insert: %s in session\n", in)
 
-	db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(BUCKET_NAME))
-		return b.Put([]byte(in), []byte(strconv.Itoa(cmd.Process.Pid)))
-
-	})
-
 	cmd.Wait()
 	if cmd.ProcessState.ExitCode() != -1 {
 		fmt.Printf("Deleting from session: %s\n", in)
-		db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(BUCKET_NAME))
-			return b.Delete([]byte(in))
-		})
+		db.Delete(in)
 	}
 	return nil
 }
