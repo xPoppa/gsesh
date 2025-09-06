@@ -6,15 +6,25 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/exec"
+	"os/signal"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
+
+	"github.com/boltdb/bolt"
 )
 
-type sessions map[string]int
+var STORAGE_DIR = "/home/poppa/.local/share/gsesh"
 
 const (
 	SERVER_SOCKET = "/tmp/gsesh.sock"
+	BUCKET_NAME   = "sessions"
 )
+
+type sessions map[string]int
 
 // This is all server code
 
@@ -23,13 +33,41 @@ func Run() {
 	// Further should it clean up all orphaned go routines? I don't know for now nope
 	// The sigint story by killing the application and writing it to a file is for later This way you can just run the application and then it will write to the storage and stuff
 	// Probably have to make a client server model. Especially as I want to run commands and shit and have them be persistent
-	keyVal := sessions{}
+	err := os.MkdirAll(STORAGE_DIR, 0700)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	db, err := bolt.Open(STORAGE_DIR+"/my.db", 0660, &bolt.Options{Timeout: 1 * time.Second})
+	defer db.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+	db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	fmt.Println("Server listening on socket: ", SERVER_SOCKET)
 	listen, err := net.Listen("unix", SERVER_SOCKET)
 	if err != nil {
 		log.Fatal("Cannot open socket: ", SERVER_SOCKET, " with err: ", err)
 	}
 	defer listen.Close()
+	defer func() {
+		os.Remove(SERVER_SOCKET)
+	}()
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, os.Kill, syscall.SIGKILL, syscall.SIGTERM)
+	go func() {
+		<-c
+		os.Remove(SERVER_SOCKET)
+		db.Close()
+		os.Exit(1)
+	}()
 
 	for {
 		conn, err := listen.Accept()
@@ -44,7 +82,7 @@ func Run() {
 		}
 
 		//fmt.Print("Message Received:", string(message[:len(message)-2]))
-		go ghostty(string(message[:len(message)-2]), keyVal)
+		go ghostty(string(message[:len(message)-1]), db)
 	}
 }
 
@@ -96,23 +134,49 @@ func handleExistingSession(in string, pid int) error {
 }
 
 // This is server code
-func ghostty(in string, keyVal sessions) error {
+func ghostty(in string, db *bolt.DB) error {
 	fmt.Println("The in string", in)
-	if pid, ok := keyVal[in]; ok {
+
+	var pid int
+	var exists bool
+	db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BUCKET_NAME))
+		bpid := b.Get([]byte(in))
+		if bpid != nil {
+			exists = true
+			p, err := strconv.Atoi(string(bpid))
+			if err != nil {
+				return err
+			}
+			pid = p
+			return nil
+		}
+		return nil
+	})
+	if exists {
 		return handleExistingSession(in, pid)
 	}
+
 	cmd := exec.Command("ghostty", "--working-directory="+in)
 	err := cmd.Start()
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Insert: %s in session\n", in)
-	keyVal[in] = cmd.Process.Pid
-	cmd.Wait()
 
+	db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BUCKET_NAME))
+		return b.Put([]byte(in), []byte(strconv.Itoa(cmd.Process.Pid)))
+
+	})
+
+	cmd.Wait()
 	if cmd.ProcessState.ExitCode() != -1 {
 		fmt.Printf("Deleting from session: %s\n", in)
-		delete(keyVal, in)
+		db.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(BUCKET_NAME))
+			return b.Delete([]byte(in))
+		})
 	}
 	return nil
 }

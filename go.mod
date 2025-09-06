@@ -2,7 +2,10 @@ module github.com/xPoppa/gsesh
 
 go 1.24.4
 
-require github.com/junegunn/fzf v0.65.2
+require (
+	github.com/boltdb/bolt v1.3.1
+	github.com/junegunn/fzf v0.65.2
+)
 
 require (
 	github.com/charlievieth/fastwalk v1.0.12 // indirect
