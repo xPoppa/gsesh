@@ -1,4 +1,3 @@
-./cli
-./daemon
-./cli
-./serv
+cli
+daemon
+serv
