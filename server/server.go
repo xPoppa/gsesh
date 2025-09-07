@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strings"
 	"syscall"
 )
@@ -24,44 +23,39 @@ type Server struct {
 	listener net.Listener
 }
 
-func setup() Server {
+func setup() (*Server, error) {
 	err := os.MkdirAll(STORAGE_DIR, 0700)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	store, err := db.NewDB(STORAGE_DIR + "/my.db")
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	err = checkPidsAndRemoveInactive(store)
 	if err != nil {
-		log.Fatal("Failed to check pids: ", err)
+		return nil, err
 	}
 
 	listen, err := net.Listen("unix", SERVER_SOCKET)
 	if err != nil {
-		log.Fatal("Cannot open socket: ", SERVER_SOCKET, " with err: ", err)
+		return nil, err
 	}
 	fmt.Println("Server listening on socket: ", SERVER_SOCKET)
-	return Server{db: store, listener: listen}
+	return &Server{db: store, listener: listen}, nil
 }
 
-func Run() {
-	server := setup()
+func Run() error {
+	server, err := setup()
+	if err != nil {
+		return err
+	}
 	defer func() {
 		server.db.Close()
 		server.listener.Close()
 		os.Remove(SERVER_SOCKET)
-	}()
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, os.Kill, syscall.SIGKILL, syscall.SIGTERM)
-	go func() {
-		<-c
-		os.Remove(SERVER_SOCKET)
-		os.Exit(1)
 	}()
 
 	for {
@@ -73,7 +67,8 @@ func Run() {
 
 		message, err := bufio.NewReader(conn).ReadString('\n')
 		if err != nil {
-			log.Fatal(err)
+			log.Println("Error reading message: ", string(message))
+			continue
 		}
 
 		errChan := make(chan error)
