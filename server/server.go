@@ -21,13 +21,28 @@ const (
 
 type sessions map[string]int
 
-// This is all server code
+func checkPidsAndRemoveInactive(db *db.DB) error {
+	pids, err := db.ReturnPids()
+	if err != nil {
+		return err
+	}
+	for _, pid := range pids {
+		proc, err := os.FindProcess(pid.Pid)
+		if err != nil {
+			return err
+		}
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			err := db.Delete(pid.Key)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 func Run() {
-	// This should run in a go routine so when it gets killed it should write things to permanent storage
-	// Further should it clean up all orphaned go routines? I don't know for now nope
-	// The sigint story by killing the application and writing it to a file is for later This way you can just run the application and then it will write to the storage and stuff
-	// Probably have to make a client server model. Especially as I want to run commands and shit and have them be persistent
+
 	err := os.MkdirAll(STORAGE_DIR, 0700)
 	if err != nil {
 		log.Fatal(err)
@@ -38,7 +53,12 @@ func Run() {
 		log.Fatal(err)
 	}
 	defer store.Close()
-	fmt.Println("Server listening on socket: ", SERVER_SOCKET)
+
+	err = checkPidsAndRemoveInactive(store)
+	if err != nil {
+		log.Fatal("Failed to check pids: ", err)
+	}
+
 	listen, err := net.Listen("unix", SERVER_SOCKET)
 	if err != nil {
 		log.Fatal("Cannot open socket: ", SERVER_SOCKET, " with err: ", err)
@@ -47,6 +67,7 @@ func Run() {
 	defer func() {
 		os.Remove(SERVER_SOCKET)
 	}()
+	fmt.Println("Server listening on socket: ", SERVER_SOCKET)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, os.Kill, syscall.SIGKILL, syscall.SIGTERM)
@@ -68,12 +89,18 @@ func Run() {
 			log.Fatal(err)
 		}
 
-		//fmt.Print("Message Received:", string(message[:len(message)-2]))
-		go ghostty(string(message[:len(message)-1]), store)
+		errChan := make(chan error)
+		go ghostty(string(message[:len(message)-1]), store, errChan)
+
+		go func() {
+			err := <-errChan
+			if err != nil {
+				log.Println("Making ghostty window failed with err: ", err)
+			}
+		}()
 	}
 }
 
-// server code
 func goToWindow(w string) error {
 	cmd := exec.Command("wmctrl", "-ia", w)
 	err := cmd.Start()
@@ -115,27 +142,27 @@ func handleExistingSession(in string, pid int) error {
 		}
 	}
 
-	fmt.Printf("Splitted res: %s", splitted)
+	fmt.Printf("Splitted res: %+v", splitted)
 
 	return nil
 }
 
 // This is server code
-func ghostty(in string, db *db.DB) error {
+func ghostty(in string, db *db.DB, errChan chan error) {
 	fmt.Println("The in string", in)
 
 	res, err := db.GetPid(in)
 	if err != nil {
-		return err
+		errChan <- err
 	}
 	if res.Exists {
-		return handleExistingSession(in, res.Pid)
+		errChan <- handleExistingSession(in, res.Pid)
 	}
 
 	cmd := exec.Command("ghostty", "--working-directory="+in)
 	err = cmd.Start()
 	if err != nil {
-		return err
+		errChan <- err
 	}
 	fmt.Printf("Insert: %s in session\n", in)
 
@@ -144,5 +171,5 @@ func ghostty(in string, db *db.DB) error {
 		fmt.Printf("Deleting from session: %s\n", in)
 		db.Delete(in)
 	}
-	return nil
+	errChan <- err
 }
