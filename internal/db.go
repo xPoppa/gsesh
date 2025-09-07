@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -17,7 +18,6 @@ type DB struct {
 
 func NewDB(path string) (*DB, error) {
 	db, err := bolt.Open(path, 0660, &bolt.Options{Timeout: 1 * time.Second})
-	defer db.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func NewDB(path string) (*DB, error) {
 }
 
 func (db *DB) Close() {
-	db.db.Close()
+	fmt.Println("closing db failed with: ", db.db.Close())
 }
 
 func (db *DB) Insert(key string, pid int) error {
@@ -80,4 +80,37 @@ func (db *DB) GetPid(key string) (Result, error) {
 		return Result{}, err
 	}
 	return Result{Pid: pid, Exists: exists}, nil
+}
+
+type Process struct {
+	Key string
+	Pid int
+}
+
+func (db *DB) ReturnPids() ([]Process, error) {
+	var procs []Process
+	fmt.Println("db Path", db.db.Path())
+
+	err := db.db.View(func(tx *bolt.Tx) error {
+		// Assume bucket exists and has keys
+		b := tx.Bucket([]byte(BUCKET_NAME))
+
+		c := b.Cursor()
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			pid, err := strconv.Atoi(string(v))
+			if err != nil {
+				return err
+			}
+			procs = append(procs, Process{Key: string(k), Pid: pid})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return procs, err
+	}
+
+	return procs, nil
 }
