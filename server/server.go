@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	db "github.com/xPoppa/gsesh/internal"
 	"log"
 	"net"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
+
+	db "github.com/xPoppa/gsesh/internal"
 )
 
 const (
@@ -47,6 +48,32 @@ func setup() (*Server, error) {
 	return &Server{db: store, listener: listen}, nil
 }
 
+func (s *Server) Serve() error {
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			log.Println("Error while accepting listeners on: ", SERVER_SOCKET, " with err: ", err)
+			return err
+		}
+
+		message, err := bufio.NewReader(conn).ReadString('\n')
+		if err != nil {
+			log.Println("Error reading message: ", string(message))
+			continue
+		}
+
+		errChan := make(chan error)
+		go ghostty(string(message[:len(message)-1]), s.db, errChan)
+
+		go func() {
+			err := <-errChan
+			if err != nil {
+				log.Println("Making ghostty window failed with err: ", err)
+			}
+		}()
+	}
+}
+
 func Run() error {
 	server, err := setup()
 	if err != nil {
@@ -57,30 +84,7 @@ func Run() error {
 		server.listener.Close()
 		os.Remove(SERVER_SOCKET)
 	}()
-
-	for {
-		conn, err := server.listener.Accept()
-		if err != nil {
-			log.Println("Error while accepting listeners on: ", SERVER_SOCKET, " with err: ", err)
-			continue
-		}
-
-		message, err := bufio.NewReader(conn).ReadString('\n')
-		if err != nil {
-			log.Println("Error reading message: ", string(message))
-			continue
-		}
-
-		errChan := make(chan error)
-		go ghostty(string(message[:len(message)-1]), server.db, errChan)
-
-		go func() {
-			err := <-errChan
-			if err != nil {
-				log.Println("Making ghostty window failed with err: ", err)
-			}
-		}()
-	}
+	return server.Serve()
 }
 
 func goToWindow(w string) error {
