@@ -24,6 +24,19 @@ type Server struct {
 	listener net.Listener
 }
 
+func Run() error {
+	server, err := setup()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		server.db.Close()
+		server.listener.Close()
+		os.Remove(SERVER_SOCKET)
+	}()
+	return server.Serve()
+}
+
 func setup() (*Server, error) {
 	err := os.MkdirAll(STORAGE_DIR, 0700)
 	if err != nil {
@@ -74,19 +87,6 @@ func (s *Server) Serve() error {
 	}
 }
 
-func Run() error {
-	server, err := setup()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		server.db.Close()
-		server.listener.Close()
-		os.Remove(SERVER_SOCKET)
-	}()
-	return server.Serve()
-}
-
 func goToWindow(w string) error {
 	cmd := exec.Command("wmctrl", "-ia", w)
 	err := cmd.Start()
@@ -100,7 +100,6 @@ func goToWindow(w string) error {
 	return nil
 }
 
-// server code
 func handleExistingSession(key string, pid int) error {
 	buff := &bytes.Buffer{}
 	fmt.Println("Already exists: ", key)
@@ -133,7 +132,6 @@ func handleExistingSession(key string, pid int) error {
 	return nil
 }
 
-// This is server code
 func ghostty(key string, db *db.DB, errChan chan error) {
 	fmt.Println("The in string", key)
 
