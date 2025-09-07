@@ -19,30 +19,12 @@ const (
 	STORAGE_DIR   = "/home/poppa/.local/share/gsesh"
 )
 
-type sessions map[string]int
-
-func checkPidsAndRemoveInactive(db *db.DB) error {
-	pids, err := db.ReturnPids()
-	if err != nil {
-		return err
-	}
-	for _, pid := range pids {
-		proc, err := os.FindProcess(pid.Pid)
-		if err != nil {
-			return err
-		}
-		if err := proc.Signal(syscall.Signal(0)); err != nil {
-			err := db.Delete(pid.Key)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+type Server struct {
+	db       *db.DB
+	listener net.Listener
 }
 
-func Run() {
-
+func setup() Server {
 	err := os.MkdirAll(STORAGE_DIR, 0700)
 	if err != nil {
 		log.Fatal(err)
@@ -52,7 +34,6 @@ func Run() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer store.Close()
 
 	err = checkPidsAndRemoveInactive(store)
 	if err != nil {
@@ -63,11 +44,17 @@ func Run() {
 	if err != nil {
 		log.Fatal("Cannot open socket: ", SERVER_SOCKET, " with err: ", err)
 	}
-	defer listen.Close()
+	fmt.Println("Server listening on socket: ", SERVER_SOCKET)
+	return Server{db: store, listener: listen}
+}
+
+func Run() {
+	server := setup()
 	defer func() {
+		server.db.Close()
+		server.listener.Close()
 		os.Remove(SERVER_SOCKET)
 	}()
-	fmt.Println("Server listening on socket: ", SERVER_SOCKET)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, os.Kill, syscall.SIGKILL, syscall.SIGTERM)
@@ -78,7 +65,7 @@ func Run() {
 	}()
 
 	for {
-		conn, err := listen.Accept()
+		conn, err := server.listener.Accept()
 		if err != nil {
 			log.Println("Error while accepting listeners on: ", SERVER_SOCKET, " with err: ", err)
 			continue
@@ -90,7 +77,7 @@ func Run() {
 		}
 
 		errChan := make(chan error)
-		go ghostty(string(message[:len(message)-1]), store, errChan)
+		go ghostty(string(message[:len(message)-1]), server.db, errChan)
 
 		go func() {
 			err := <-errChan
@@ -115,9 +102,9 @@ func goToWindow(w string) error {
 }
 
 // server code
-func handleExistingSession(in string, pid int) error {
+func handleExistingSession(key string, pid int) error {
 	buff := &bytes.Buffer{}
-	fmt.Println("Already exists: ", in)
+	fmt.Println("Already exists: ", key)
 	cmd := exec.Command("wmctrl", "-lp")
 	cmd.Stdout = buff
 
@@ -148,28 +135,48 @@ func handleExistingSession(in string, pid int) error {
 }
 
 // This is server code
-func ghostty(in string, db *db.DB, errChan chan error) {
-	fmt.Println("The in string", in)
+func ghostty(key string, db *db.DB, errChan chan error) {
+	fmt.Println("The in string", key)
 
-	res, err := db.GetPid(in)
+	res, err := db.GetPid(key)
 	if err != nil {
 		errChan <- err
 	}
 	if res.Exists {
-		errChan <- handleExistingSession(in, res.Pid)
+		errChan <- handleExistingSession(key, res.Pid)
 	}
 
-	cmd := exec.Command("ghostty", "--working-directory="+in)
+	cmd := exec.Command("ghostty", "--working-directory="+key)
 	err = cmd.Start()
 	if err != nil {
 		errChan <- err
 	}
-	fmt.Printf("Insert: %s in session\n", in)
+	fmt.Printf("Insert: %s in session\n", key)
 
 	cmd.Wait()
 	if cmd.ProcessState.ExitCode() != -1 {
-		fmt.Printf("Deleting from session: %s\n", in)
-		db.Delete(in)
+		fmt.Printf("Deleting from session: %s\n", key)
+		db.Delete(key)
 	}
 	errChan <- err
+}
+
+func checkPidsAndRemoveInactive(db *db.DB) error {
+	pids, err := db.ReturnPids()
+	if err != nil {
+		return err
+	}
+	for _, pid := range pids {
+		proc, err := os.FindProcess(pid.Pid)
+		if err != nil {
+			return err
+		}
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			err := db.Delete(pid.Key)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
