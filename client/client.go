@@ -84,6 +84,9 @@ func FuzzyFind(in *bytes.Buffer) {
 	code, err := fzf.Run(options)
 	// send output
 	fmt.Println(output)
+	if output == "" {
+		exit(code, err)
+	}
 	sendToConn(output)
 	exit(code, err)
 }
