@@ -54,5 +54,4 @@ func main() {
 		BinDir:     gseshServer,
 		User:       u.Username,
 	})
-
 }
