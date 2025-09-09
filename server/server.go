@@ -65,6 +65,7 @@ func setup() (*Server, error) {
 	return &Server{db: store, listener: listen}, nil
 }
 
+// TODO: Add more commands to server, list sessions, kill session
 func (s *Server) Serve() error {
 	for {
 		conn, err := s.listener.Accept()
@@ -91,6 +92,8 @@ func (s *Server) Serve() error {
 	}
 }
 
+// TODO: Make output a struct. Nicely interface with wmctrl
+// TODO: Port wmctrl?
 func goToWindow(w string) error {
 	cmd := exec.Command("wmctrl", "-ia", w)
 	err := cmd.Start()

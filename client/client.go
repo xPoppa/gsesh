@@ -25,6 +25,10 @@ func Run() {
 }
 
 // client code
+// TODO: Abstract command if needed?
+// TODO:  take directories as input
+// TODO: List sessions
+// TODO:
 func FindCmd() (*bytes.Buffer, error) {
 	homeDir, _ := os.UserHomeDir()
 	findCmd := exec.Command(
