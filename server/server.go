@@ -38,7 +38,11 @@ func Run() error {
 }
 
 func setup() (*Server, error) {
-	err := os.MkdirAll(STORAGE_DIR, 0700)
+	err := os.Remove(SERVER_SOCKET)
+	if err != nil {
+		return nil, err
+	}
+	err = os.MkdirAll(STORAGE_DIR, 0700)
 	if err != nil {
 		return nil, err
 	}

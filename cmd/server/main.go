@@ -1,7 +1,16 @@
 package main
 
-import "github.com/xPoppa/gsesh/server"
+import (
+	"log"
+	"os"
+
+	"github.com/xPoppa/gsesh/server"
+)
 
 func main() {
-	server.Run()
+	err := server.Run()
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
 }

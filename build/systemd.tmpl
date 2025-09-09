@@ -1,0 +1,17 @@
+[Unit]
+Description=GSesh Daemon
+After=network.target # Adjust if your daemon has other dependencies
+
+[Service]
+Type=simple
+ExecStart={{ .BinDir }} # Path to your compiled Go executable
+WorkingDirectory={{ .StorageDir }} # Set this if your daemon needs to access files relative to this location 
+User={{ .User }}
+Group={{ .User }} 
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

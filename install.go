@@ -4,6 +4,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/user"
+	"text/template"
+
+	"github.com/xPoppa/gsesh/server"
 )
 
 const (
@@ -11,13 +15,16 @@ const (
 )
 
 func main() {
-
+	os.Mkdir("build", 0660)
+	u, err := user.Current()
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Println("Cannot find user home dir: ", err)
 	}
+	gsesh := homeDir + INSTALL_PATH + "gsesh"
+	gseshServer := homeDir + INSTALL_PATH + "gsesh_server"
 
-	cmd := exec.Command("go build", "-o", homeDir+INSTALL_PATH+"gsesh", "cmd/cli/main.go")
+	cmd := exec.Command("go", "build", "-o", gsesh, "cmd/cli/main.go")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
@@ -27,7 +34,7 @@ func main() {
 		return
 	}
 
-	cmd = exec.Command("go build", "-o", homeDir+INSTALL_PATH+"gsesh_server", "cmd/server/main.go")
+	cmd = exec.Command("go", "build", "-o", gseshServer, "cmd/server/main.go")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
@@ -36,4 +43,16 @@ func main() {
 		os.Exit(1)
 		return
 	}
+
+	tmpl, err := template.ParseFiles("build/systemd.tmpl")
+	tmpl.Execute(os.Stdout, struct {
+		StorageDir string
+		BinDir     string
+		User       string
+	}{
+		StorageDir: server.STORAGE_DIR,
+		BinDir:     gseshServer,
+		User:       u.Username,
+	})
+
 }
