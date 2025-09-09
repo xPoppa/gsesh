@@ -71,7 +71,7 @@ func FuzzyFind(in *bytes.Buffer) {
 
 	options, err := fzf.ParseOptions(
 		true, // whether to load defaults ($FZF_DEFAULT_OPTS_FILE and $FZF_DEFAULT_OPTS)
-		[]string{"--multi", "--reverse", "--border", "--height=40%"},
+		[]string{"--multi", "--reverse", "--border", "--height=80%"},
 	)
 
 	if err != nil {
