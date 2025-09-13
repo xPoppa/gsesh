@@ -1,7 +1,9 @@
 package db
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -64,8 +66,23 @@ func (db *DB) GetPid(key string) (Result, error) {
 	var exists bool
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(BUCKET_NAME))
+		if b == nil {
+			return errors.New("Bucket doesn't exist")
+		}
+
+		err := b.ForEach(func(k, v []byte) error {
+			log.Printf("The key: %s\n", string(k))
+			log.Printf("The value: %s\n", string(v))
+			return nil
+		})
+		if err != nil {
+			log.Println("logging failed")
+		}
+
+		log.Printf("Getting bpid by key: %q", key)
 		bpid := b.Get([]byte(key))
 		if bpid != nil {
+			log.Printf("Bpid exists with: %q", string(bpid))
 			exists = true
 			p, err := strconv.Atoi(string(bpid))
 			if err != nil {
@@ -74,11 +91,14 @@ func (db *DB) GetPid(key string) (Result, error) {
 			pid = p
 			return nil
 		}
+
 		return nil
 	})
+
 	if err != nil {
 		return Result{}, err
 	}
+	log.Printf("Returning the result, exists=%+v, pid:%d", exists, pid)
 	return Result{Pid: pid, Exists: exists}, nil
 }
 

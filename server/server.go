@@ -41,11 +41,8 @@ func Run() error {
 }
 
 func setup() (*Server, error) {
-	err := os.Remove(SERVER_SOCKET)
-	if err != nil {
-		return nil, err
-	}
-	err = os.MkdirAll(STORAGE_DIR, 0700)
+	os.Remove(SERVER_SOCKET)
+	err := os.MkdirAll(STORAGE_DIR, 0700)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +61,7 @@ func setup() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Server listening on socket: ", SERVER_SOCKET)
+	log.Println("Server listening on socket: ", SERVER_SOCKET)
 	return &Server{db: store, listener: listen}, nil
 }
 
@@ -112,7 +109,7 @@ func goToWindow(w string) error {
 
 func handleExistingSession(key string, pid int) error {
 	buff := &bytes.Buffer{}
-	fmt.Println("Already exists: ", key)
+	log.Println("Already exists: ", key)
 	cmd := exec.Command("wmctrl", "-lp")
 	cmd.Stdout = buff
 
@@ -128,6 +125,7 @@ func handleExistingSession(key string, pid int) error {
 	res := buff.String()
 	splitted := strings.Split(res, "\n")
 	for _, s := range splitted {
+		log.Printf("HANDLE_EXISTSING: wmctrl output: %s", s)
 		if strings.Contains(s, fmt.Sprint(pid)) {
 
 			splittedIter := strings.Split(s, " ")
@@ -137,35 +135,43 @@ func handleExistingSession(key string, pid int) error {
 		}
 	}
 
-	fmt.Printf("Splitted res: %+v", splitted)
+	log.Printf("Splitted res: %+v", splitted)
 
 	return nil
 }
 
 func ghostty(key string, db *db.DB, errChan chan error) {
-	fmt.Println("The in string", key)
-
 	res, err := db.GetPid(key)
 	if err != nil {
 		errChan <- err
+		return
 	}
 	if res.Exists {
 		errChan <- handleExistingSession(key, res.Pid)
+		return
 	}
 
 	cmd := exec.Command("ghostty", "--working-directory="+key)
 	err = cmd.Start()
 	if err != nil {
 		errChan <- err
+		return
 	}
-	fmt.Printf("Insert: %s in session\n", key)
+	log.Printf("Insert: %s in session\n", key)
+	err = db.Insert(key, cmd.Process.Pid)
+	if err != nil {
+		errChan <- err
+		return
+	}
 
 	cmd.Wait()
 	if cmd.ProcessState.ExitCode() != -1 {
-		fmt.Printf("Deleting from session: %s\n", key)
+		log.Printf("Deleting from session: %s\n", key)
 		db.Delete(key)
+		return
 	}
 	errChan <- err
+	return
 }
 
 func checkPidsAndRemoveInactive(db *db.DB) error {
