@@ -32,7 +32,10 @@ func Run() error {
 	defer func() {
 		server.db.Close()
 		server.listener.Close()
-		os.Remove(SERVER_SOCKET)
+		err := os.Remove(SERVER_SOCKET)
+		if err != nil {
+			log.Println("Socket already removed")
+		}
 	}()
 	return server.Serve()
 }
